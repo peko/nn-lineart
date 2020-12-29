@@ -1,0 +1,284 @@
+<html>
+<header>
+ <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"
+   integrity="sha512-xodZBNTC5n17Xt2atTPuE1HxjVMSvLVW9ocqUKLsCC5CXdbqCmblAshOMAS6/keqq/sMZMZ19scR4PsZChSR7A=="
+   crossorigin=""/>
+
+<style>
+body, html {with: 100%; height:100%; margin:0;}
+#mapid { height: 100%; width:100%;}
+</style>
+
+</header>
+<body>
+ <div id="mapid"></div>
+ <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"
+   integrity="sha512-XQoYMqMTK8LvdxXYG3nZ448hOEQiglfqkJs1NOQV44cWnUrBc8PkAOcXy20w0vlaXaVUearIOBhiXZ5V3ynxwA=="
+   crossorigin=""></script>
+
+    
+<script>
+
+
+let bounds = [[0,0],[-(1<<17),1<<17]]
+let maxZoom =   0;
+let minZoom = -10;
+let showDebug = false;
+    
+    
+var l0 = L.tileLayer('https://vs43.ailove.ru/test_line-art/_map/faces_2/{z}-{y}-{x}.jpg', {
+    maxZoom,
+    minZoom,
+    bounds,
+    attribution: '<a href="https://github.com/NVlabs/ffhq-dataset">ffhq-dataset</a>',
+    id: 'artline',
+    tileSize: 256,
+    zoomOffset: 10,
+    zindex:100,
+    // bounds: bounds,
+})
+
+var l1 = L.tileLayer('https://vs43.ailove.ru/test_line-art/_map/artline/{z}-{y}-{x}.jpg', {
+    maxZoom,
+    minZoom,
+    bounds,
+    id: 'artline',
+    attribution: '<a href="https://github.com/vijishmadhavan/ArtLine">vijishmadhavan/ArtLine</a>',
+    tileSize: 256,
+    zoomOffset: 10,
+    zindex: 100,
+    // bounds: bounds,
+})
+
+var l2 = L.tileLayer('https://vs43.ailove.ru/test_line-art/_map/u2net/{z}-{y}-{x}.jpg', {
+    maxZoom,
+    minZoom,
+    bounds,
+    attribution: '<a href="https://github.com/NathanUA/U-2-Net">NathanUA/U-2-Net</a>',
+    id:'u2net',
+    tileSize: 256,
+    zoomOffset: 10,
+    zindex:100,
+    // bounds: bounds,
+})
+
+
+var currentLayer = l0;
+
+L.Map.BoxSelector = L.Map.BoxZoom.extend({
+    _onMouseDown: function (e) {
+        if (!(e.shiftKey || e.altKey || e.ctrlKey ) || ((e.which !== 1) && (e.button !== 1))) { return false; }
+        
+        this._map.dragging.disable();
+
+        this._clearDeferredResetState();
+        this._resetState();
+
+        L.DomUtil.disableTextSelection();
+        L.DomUtil.disableImageDrag();
+        
+        this._startPoint = this._map.mouseEventToContainerPoint(e);
+
+        L.DomEvent.on(document, {
+            contextmenu: L.DomEvent.stop,
+            mousemove: this._onMouseMove,
+            mouseup: this._onMouseUp,
+            keydown: this._onKeyDown
+        }, this);
+    },
+
+    _onMouseUp: function (e) {
+        if ((e.which !== 1) && (e.button !== 1)) { return; }
+        
+        this._map.dragging.enable();
+
+        
+        this._finish();
+        if (!this._moved) { return; }
+        // Postpone to next JS tick so internal click event handling
+        // still see it as "moved".
+        this._clearDeferredResetState();
+        this._resetStateTimeout = setTimeout(L.Util.bind(this._resetState, this), 0);
+        var bounds = new L.LatLngBounds(
+                this._map.containerPointToLatLng(this._startPoint),
+                this._map.containerPointToLatLng(this._point));
+        
+        this._map
+//         .fitBounds(bounds)
+        .fire('boxselectend', {boxSelectBounds: bounds, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey});
+    },
+});
+L.Map.mergeOptions({boxZoom: false});
+L.Map.mergeOptions({boxSelector: true});
+L.Map.addInitHook('addHandler', 'boxSelector', L.Map.BoxSelector);
+
+
+var layers = [l0, l1, l2];
+// Создаем карту
+var map = L.map(
+  'mapid',
+  {
+    crs: L.CRS.Simple,
+    minZoom: -9,
+    maxZoom: 0,
+    bounds,
+    layers:[l0],
+  }
+)
+
+map.fitBounds([[-512,512],[-1024,1024]]);
+
+
+// Канвас маски
+var s_cvs = L.DomUtil.create('canvas', 'leaflet-tile');
+s_cvs.width  = 512;
+s_cvs.height = 512;
+var s_ctx = s_cvs.getContext('2d');
+
+function selectTiles(bounds, color) {
+    let w,n,e,s;
+    w = bounds.getWest()
+    n =-bounds.getNorth()
+    e = bounds.getEast()
+    s =-bounds.getSouth()
+    //console.log(w,n,e,s)
+    w = Math.floor(w/256.0)
+    n = Math.floor(n/256.0)
+    e = Math.ceil (e/256.0)
+    s = Math.ceil (s/256.0)
+    
+    console.log(w,n,e,s)
+    console.log(e, n, e-w, s-n);
+    
+    // Очищаем регион
+    s_ctx.beginPath();
+    s_ctx.fillStyle = "rgba(0,0,0,1)";
+    s_ctx.globalCompositeOperation = "destination-out";
+    s_ctx.rect(e, n, w-e, s-n);
+    s_ctx.closePath();
+    s_ctx.fill();
+    
+    // Заполняем цветом
+    s_ctx.beginPath();
+    s_ctx.globalCompositeOperation = "source-over";
+    s_ctx.fillStyle = color;
+    s_ctx.rect(e, n, w-e, s-n);
+    s_ctx.closePath();
+    s_ctx.fill();
+    
+    tiles.redraw();
+}
+
+
+// Отрисовка выбора
+var tiles = new L.GridLayer({
+    zindex: 200,
+    minZoom,
+    bounds,
+});
+tiles.createTile = function(coords) {
+  var tile = L.DomUtil.create('canvas', 'leaflet-tile');
+  var ctx = tile.getContext('2d');
+    
+  var size = this.getTileSize()
+  tile.width  = size.x
+  tile.height = size.y
+  
+  // calculate projection coordinates of top left tile pixel
+  var nwPoint = coords.scaleBy(size)
+  
+  // calculate geographic coordinates of top left tile pixel
+  var nw = map.unproject(nwPoint, coords.z)
+
+  ctx.imageSmoothingEnabled = false;
+  let s = 1 << -coords.z;
+  ctx.drawImage(s_cvs,
+    nw.lng/256, -nw.lat/256, s, s, 
+    0, 0, 256, 256);
+  
+  if (showDebug) {
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, size.x, 50);
+      ctx.fillStyle = 'black';
+      ctx.fillText('x: ' + coords.x + ', y: ' + coords.y + ', zoom: ' + coords.z, 20, 20);
+      ctx.fillText('lat: ' + nw.lat + ', lon: ' + nw.lng, 20, 40);
+      ctx.strokeStyle = 'gray';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(size.x-1, 0);
+      ctx.lineTo(size.x-1, size.y-1);
+      // ctx.lineTo(0, size.y-1);
+      // ctx.closePath();
+      ctx.stroke();
+  }
+  return tile;
+}
+tiles.addTo(map);
+    
+    
+    
+L.control.layers({
+  "Originals": l0,
+  "ArtLine": l1,
+  "U2Net": l2,
+
+}).addTo(map);
+
+
+// Превьюха
+let Preview = L.Control.extend({ 
+  _container: null,
+  options: {
+    position: 'bottomleft'
+  },
+  onAdd: function (map) {
+    let img = L.DomUtil.create('img', 'preview')
+    this._img = img
+    return img
+  },
+  updateHTML: function(x, y) {
+    let url = currentLayer._url;
+    let layer = url.split('/')[5];
+    this._img.src = `https://vs43.ailove.ru/test_line-art/_map/${layer}/${10}-${y}-${x}.jpg`;
+  }
+});
+let preview = new Preview();
+map.addControl(preview);
+map.addEventListener('mousemove', (event) => {
+    let {lat, lng} = event.latlng;
+    x= lng/256|0
+    y=-lat/256|0
+    preview.updateHTML(x, y);
+  }
+);
+map.addEventListener('boxselectend', (e) => {
+    let color = e.shift ? "rgba(255,0,0,0.25)" : 
+                e.ctrl  ? "rgba(0,255,0,0.25)" : 
+                e.alt   ? "rgba(0,  0,0,0.0)" : null;
+    selectTiles(e.boxSelectBounds, color);
+});
+
+    
+// Клавиатура
+window.addEventListener("keypress", function(e) {
+  var pressedKey = Number(e.key);
+
+  // If button pressed is not a number, return.
+  if (isNaN(pressedKey)) return;
+  console.log(pressedKey)
+  // If the pressed number is greater than the length of layers, return.
+  if (pressedKey - 1 >= layers.length) return;
+  // If currentLayer is set, remove it from the map.
+  if (currentLayer) map.removeLayer(currentLayer);
+  // map.eachLayer(function (layer) {
+  //     map.removeLayer(layer);
+  // })
+  currentLayer = layers[pressedKey - 1];
+  map.addLayer(currentLayer);
+
+  currentLayer.setZIndex(100);
+  tiles.setZIndex(200);
+});
+</script>
+
+</html>
